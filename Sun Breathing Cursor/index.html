@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sun Breathing Cursor</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+        cursor: none;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+      .bg {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        background: radial-gradient(
+          ellipse at 50% 30%,
+          #1a0005 0%,
+          #0a0002 40%,
+          #000 100%
+        );
+      }
+      .tanjiro-bg {
+        position: fixed;
+        top: -5%;
+        left: -5%;
+        width: 110%;
+        height: 110%;
+        z-index: 1;
+        background-image: url("bg.png");
+        background-size: cover;
+        background-position: center;
+        opacity: 0.6;
+        pointer-events: none;
+        will-change: transform;
+        transition: opacity 0.3s;
+      }
+      body.aura-active .tanjiro-bg {
+        opacity: 0.22;
+      }
+      #c {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        pointer-events: none;
+      }
+      #hd {
+        position: fixed;
+        inset: 0;
+        z-index: 9;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bg"></div>
+    <div class="tanjiro-bg" id="tbg"></div>
+    <canvas id="hd"></canvas>
+    <canvas id="c"></canvas>
+
+    <script>
+      (function () {
+        "use strict";
+
+        /* ── Canvas & DPR ── */
+        const C = document.getElementById("c");
+        const ctx = C.getContext("2d");
+        const HD = document.getElementById("hd");
+        const hctx = HD.getContext("2d");
+        let W, H, dpr;
+
+        function resize() {
+          dpr = Math.min(devicePixelRatio || 1, 2);
+          W = innerWidth;
+          H = innerHeight;
+          C.width = W * dpr;
+          C.height = H * dpr;
+          C.style.width = W + "px";
+          C.style.height = H + "px";
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          HD.width = W * dpr;
+          HD.height = H * dpr;
+          HD.style.width = W + "px";
+          HD.style.height = H + "px";
+          hctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+        addEventListener("resize", resize);
+        resize();
+
+        /* ── Math helpers ── */
+        const lerp = (a, b, t) => a + (b - a) * t;
+        const rand = (a, b) => a + Math.random() * (b - a);
+        const randi = (a, b) => (a + Math.random() * (b - a)) | 0;
+        const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+        const TAU = Math.PI * 2;
+
+        /* ══════════════════════════════════════════════════
+           SUN BREATHING COLOR SYSTEM
+           Deep crimson → scarlet → blood red → fiery red → rose-white
+           Tanjiro's solar flame: predominantly red, minimal yellow/white
+        ══════════════════════════════════════════════════ */
+        const LUT_R = new Uint8Array(256);
+        const LUT_G = new Uint8Array(256);
+        const LUT_B = new Uint8Array(256);
+        (function () {
+          const stops = [
+            [0,   [0,   0,   0 ]],
+            [35,  [60,  0,   2 ]],
+            [75,  [160, 5,   8 ]],
+            [115, [220, 15,  12]],
+            [155, [240, 35,  18]],
+            [195, [255, 65,  30]],
+            [228, [255, 110, 55]],
+            [255, [255, 175, 110]],
+          ];
+          for (let i = 0; i < 256; i++) {
+            for (let s = 0; s < stops.length - 1; s++) {
+              const [t0, c0] = stops[s], [t1, c1] = stops[s + 1];
+              if (i >= t0 && i <= t1) {
+                const f = (i - t0) / (t1 - t0);
+                LUT_R[i] = (c0[0] + (c1[0] - c0[0]) * f) | 0;
+                LUT_G[i] = (c0[1] + (c1[1] - c0[1]) * f) | 0;
+                LUT_B[i] = (c0[2] + (c1[2] - c0[2]) * f) | 0;
+                break;
+              }
+            }
+          }
+        })();
+
+        /* Solar corona accent LUT — deep maroon → crimson → orange-red (used for halos/rings) */
+        const CLUT_R = new Uint8Array(256);
+        const CLUT_G = new Uint8Array(256);
+        const CLUT_B = new Uint8Array(256);
+        (function () {
+          const stops = [
+            [0,   [0,   0,   0 ]],
+            [50,  [45,  0,   5 ]],
+            [110, [130, 8,   10]],
+            [165, [200, 25,  15]],
+            [215, [240, 55,  25]],
+            [255, [255, 90,  40]],
+          ];
+          for (let i = 0; i < 256; i++) {
+            for (let s = 0; s < stops.length - 1; s++) {
+              const [t0, c0] = stops[s], [t1, c1] = stops[s + 1];
+              if (i >= t0 && i <= t1) {
+                const f = (i - t0) / (t1 - t0);
+                CLUT_R[i] = (c0[0] + (c1[0] - c0[0]) * f) | 0;
+                CLUT_G[i] = (c0[1] + (c1[1] - c0[1]) * f) | 0;
+                CLUT_B[i] = (c0[2] + (c1[2] - c0[2]) * f) | 0;
+                break;
+              }
+            }
+          }
+        })();
+
+        function sunColor(t, a) {
+          const i = clamp(t * 255, 0, 255) | 0;
+          return `rgba(${LUT_R[i]},${LUT_G[i]},${LUT_B[i]},${a})`;
+        }
+        function coronaColor(t, a) {
+          const i = clamp(t * 255, 0, 255) | 0;
+          return `rgba(${CLUT_R[i]},${CLUT_G[i]},${CLUT_B[i]},${a})`;
+        }
+
+        /* ── Pointer state ── */
+        const P = {
+          x: W / 2, y: H / 2,
+          tx: W / 2, ty: H / 2,
+          px: W / 2, py: H / 2,
+          vx: 0, vy: 0,
+          speed: 0, lastMove: 0,
+        };
+        function setTarget(x, y) {
+          P.tx = x; P.ty = y;
+          P.lastMove = performance.now();
+        }
+        addEventListener("mousemove", (e) => setTarget(e.clientX, e.clientY));
+        addEventListener("touchmove", (e) => {
+          if (e.touches.length) setTarget(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: true });
+
+        addEventListener("mousedown", (e) => {
+          document.body.classList.add("aura-active");
+          burst(e.clientX, e.clientY);
+        });
+        addEventListener("mouseup", () => document.body.classList.remove("aura-active"));
+        addEventListener("mouseleave", () => document.body.classList.remove("aura-active"));
+        addEventListener("touchstart", (e) => {
+          document.body.classList.add("aura-active");
+          if (e.touches.length) {
+            setTarget(e.touches[0].clientX, e.touches[0].clientY);
+            burst(P.tx, P.ty);
+          }
+        }, { passive: true });
+        addEventListener("touchend", () => document.body.classList.remove("aura-active"));
+
+        /* ══════════════════════════════════════════
+           PARTICLE POOLS
+        ══════════════════════════════════════════ */
+
+        /* — Embers — */
+        const EMAX = 600;
+        const embers = [];
+        for (let i = 0; i < EMAX; i++) embers.push({ alive: false });
+        let eHead = 0;
+        function spawnEmber(x, y, vx, vy, life, sz, hot) {
+          const e = embers[eHead % EMAX];
+          eHead++;
+          e.alive = true; e.x = x; e.y = y; e.vx = vx; e.vy = vy;
+          e.age = 0; e.life = life; e.sz = sz; e.hot = hot;
+          e.sway = rand(0.4, 1.4); e.phase = rand(0, TAU);
+          e.grav = rand(40, 90);
+        }
+
+        /* — Smoke puffs — */
+        const SMAX = 300;
+        const smoke = [];
+        for (let i = 0; i < SMAX; i++) smoke.push({ alive: false });
+        let sHead = 0;
+        function spawnSmoke(x, y, vx, vy, r, life, dark) {
+          const s = smoke[sHead % SMAX];
+          sHead++;
+          s.alive = true; s.x = x; s.y = y; s.vx = vx; s.vy = vy;
+          s.age = 0; s.life = life; s.r = r;
+          s.dark = dark || false;
+        }
+
+        /* — Flame puffs — */
+        const FMAX = 350;
+        const flames = [];
+        for (let i = 0; i < FMAX; i++) flames.push({ alive: false });
+        let fHead = 0;
+        function spawnFlame(x, y, vx, vy, r, life, hot) {
+          const f = flames[fHead % FMAX];
+          fHead++;
+          f.alive = true; f.x = x; f.y = y; f.vx = vx; f.vy = vy;
+          f.age = 0; f.life = life; f.r = r; f.hot = hot;
+        }
+
+        /* — Sparks — */
+        const SPKMAX = 400;
+        const sparks = [];
+        for (let i = 0; i < SPKMAX; i++) sparks.push({ alive: false, px: 0, py: 0 });
+        let spkHead = 0;
+        function spawnSpark(x, y, vx, vy, life, bright) {
+          const s = sparks[spkHead % SPKMAX];
+          spkHead++;
+          s.alive = true; s.x = x; s.y = y; s.px = x; s.py = y;
+          s.vx = vx; s.vy = vy;
+          s.age = 0; s.life = life; s.bright = bright;
+        }
+
+        /* — Shockwaves & flashes — */
+        const waves = [];
+        const flashes = [];
+
+        /* — Heat shimmer cells — */
+        const HDMAX = 200;
+        const hdCells = [];
+        for (let i = 0; i < HDMAX; i++) hdCells.push({ alive: false });
+        let hdHead = 0;
+        function spawnHD(x, y, str, life) {
+          const h = hdCells[hdHead % HDMAX];
+          hdHead++;
+          h.alive = true; h.x = x; h.y = y; h.str = str; h.age = 0; h.life = life;
+        }
+
+        /* — Trail points — */
+        const TMAX = 60;
+        const trail = [];
+
+        /* ── Burst (click) — Sun Breathing: First Form — Dance of the Fire God ── */
+        function burst(x, y) {
+          waves.push({ x, y, r: 0, maxR: rand(180, 280), age: 0, life: 600 });
+          flashes.push({ x, y, r: 0, maxR: rand(250, 380), age: 0, life: 500 });
+
+          const JETS = 24;
+          for (let i = 0; i < JETS; i++) {
+            const a = (i / JETS) * TAU + rand(-0.15, 0.15);
+            const spd = rand(120, 380);
+            const vx = Math.cos(a) * spd, vy = Math.sin(a) * spd;
+            spawnFlame(x, y, vx, vy, rand(25, 55), rand(400, 800), rand(0.6, 1.0));
+            if (i % 2 === 0)
+              spawnSmoke(
+                x + rand(-8, 8), y + rand(-8, 8),
+                vx * 0.25, vy * 0.25 - rand(30, 60),
+                rand(22, 40), rand(600, 900), true
+              );
+          }
+          for (let i = 0; i < 120; i++) {
+            const a = rand(0, TAU), spd = rand(80, 500);
+            spawnSpark(x, y, Math.cos(a) * spd, Math.sin(a) * spd, rand(300, 900), rand(0.7, 1.0));
+          }
+          for (let i = 0; i < 80; i++) {
+            const a = rand(0, TAU) - Math.PI / 2, spd = rand(40, 220);
+            spawnEmber(
+              x, y, Math.cos(a) * spd, Math.sin(a) * spd - rand(50, 120),
+              rand(500, 1200), rand(1.5, 3.5), rand(0.5, 1.0)
+            );
+          }
+          spawnHD(x, y, rand(8, 14), rand(500, 900));
+        }
+
+        /* ── Trail helpers ── */
+        function addTrail(x, y, t) {
+          if (trail.length >= TMAX) trail.shift();
+          trail.push({ x, y, t });
+        }
+
+        /* ── MAIN LOOP ── */
+        let last = performance.now();
+        let ambE = 0, ambF = 0, ambHD = 0;
+
+        function frame(now) {
+          requestAnimationFrame(frame);
+          const dt = Math.min(now - last, 33);
+          last = now;
+          const dtS = dt * 0.001;
+
+          /* Pointer tracking */
+          P.px = P.x; P.py = P.y;
+          const ease = 1 - Math.pow(0.001, dtS * 5);
+          P.x = lerp(P.x, P.tx, ease);
+          P.y = lerp(P.y, P.ty, ease);
+          P.vx = (P.x - P.px) / Math.max(dtS, 0.001);
+          P.vy = (P.y - P.py) / Math.max(dtS, 0.001);
+          P.speed = Math.hypot(P.vx, P.vy);
+
+          /* Parallax bg — single clean transform, no duplicating */
+          const bx = (P.tx / W - 0.5) * -36;
+          const by = (P.ty / H - 0.5) * -36;
+          document.getElementById("tbg").style.transform =
+            `translate(${bx}px,${by}px) scale(1.08)`;
+
+          /* Trail */
+          addTrail(P.x, P.y, now);
+          while (trail.length && now - trail[0].t > 320) trail.shift();
+
+          const idle = now - P.lastMove;
+          const moving = idle < 120;
+          const speedFactor = clamp(P.speed / 300, 0, 1);
+
+          /* Ambient emission */
+          ambE -= dt;
+          if (ambE <= 0) {
+            ambE = moving ? rand(8, 20) : rand(25, 50);
+            const n = moving ? randi(2, 5) : 1;
+            for (let i = 0; i < n; i++) {
+              const a = -Math.PI / 2 + rand(-0.8, 0.8);
+              const spd = rand(20, 80) * (1 + speedFactor * 2);
+              spawnEmber(
+                P.x + rand(-5, 5), P.y + rand(-5, 5),
+                Math.cos(a) * spd, Math.sin(a) * spd - rand(20, 50),
+                rand(600, 1400), rand(1.2, 3.0), rand(0.3, 0.8)
+              );
+            }
+          }
+
+          ambF -= dt;
+          if (ambF <= 0) {
+            ambF = moving ? rand(12, 28) : rand(35, 70);
+            const n = moving ? randi(2, 6) : randi(1, 3);
+            for (let i = 0; i < n; i++) {
+              const a = -Math.PI / 2 + rand(-1.0, 1.0);
+              const spd = rand(15, 70) * (1 + speedFactor * 1.5);
+              spawnFlame(
+                P.x + rand(-6, 6), P.y + rand(-6, 6),
+                Math.cos(a) * spd * 0.5, Math.sin(a) * spd - rand(10, 40),
+                rand(10, 28) * (1 + speedFactor * 0.8),
+                rand(180, 400), rand(0.4, 1.0)
+              );
+            }
+            if (Math.random() < (moving ? 0.4 : 0.1))
+              spawnSmoke(
+                P.x + rand(-8, 8), P.y - 10,
+                rand(-15, 15), rand(-40, -15),
+                rand(14, 26), rand(400, 700), false
+              );
+          }
+
+          ambHD -= dt;
+          if (ambHD <= 0) {
+            ambHD = rand(80, 150);
+            spawnHD(P.x + rand(-15, 15), P.y + rand(-15, 15), rand(3, 6), rand(200, 400));
+          }
+
+          /* Movement-triggered emission */
+          if (moving && P.speed > 20) {
+            const n = clamp((P.speed / 100) | 0, 1, 6);
+            for (let i = 0; i < n; i++) {
+              const t = Math.random();
+              const sx = lerp(P.px, P.x, t), sy = lerp(P.py, P.y, t);
+              const a = -Math.PI / 2 + rand(-1.1, 1.1);
+              const spd = rand(30, 110) + speedFactor * 60;
+              spawnFlame(
+                sx + rand(-4, 4), sy + rand(-4, 4),
+                P.vx * 0.1 + Math.cos(a) * spd * 0.4,
+                -Math.abs(Math.sin(a) * spd) - rand(20, 55),
+                rand(8, 22), rand(150, 350), rand(0.6, 1.0)
+              );
+              if (Math.random() < 0.5)
+                spawnEmber(
+                  sx, sy,
+                  P.vx * 0.08 + rand(-40, 40), -rand(40, 130),
+                  rand(500, 1100), rand(1, 2.5), rand(0.5, 1.0)
+                );
+              if (P.speed > 150 && Math.random() < 0.2)
+                spawnSpark(
+                  sx, sy,
+                  P.vx * 0.2 + rand(-80, 80), P.vy * 0.2 + rand(-80, 80),
+                  rand(200, 500), 0.8
+                );
+            }
+          }
+
+          /* ═══════════ DRAW ═══════════ */
+          ctx.clearRect(0, 0, W, H);
+          ctx.globalCompositeOperation = "lighter";
+
+          /* ── Flashes — deep crimson-scarlet bloom ── */
+          for (let i = flashes.length - 1; i >= 0; i--) {
+            const f = flashes[i];
+            f.age += dt;
+            if (f.age >= f.life) { flashes.splice(i, 1); continue; }
+            const tp = f.age / f.life;
+            const r = lerp(0, f.maxR, Math.pow(tp, 0.3));
+            const a = (1 - tp) * (1 - tp) * 0.35;
+            const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, r);
+            g.addColorStop(0,   `rgba(255,120,60,${a})`);
+            g.addColorStop(0.22, `rgba(240,40,15,${a * 0.82})`);
+            g.addColorStop(0.55, `rgba(180,8,5,${a * 0.48})`);
+            g.addColorStop(0.8,  `rgba(80,0,2,${a * 0.22})`);
+            g.addColorStop(1,   "rgba(0,0,0,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(f.x, f.y, r, 0, TAU);
+            ctx.fill();
+          }
+
+          /* ── Shockwaves — crimson rings ── */
+          for (let i = waves.length - 1; i >= 0; i--) {
+            const w = waves[i];
+            w.age += dt;
+            if (w.age >= w.life) { waves.splice(i, 1); continue; }
+            const tp = w.age / w.life;
+            const r = lerp(0, w.maxR, Math.pow(tp, 0.5));
+            const a = (1 - tp) * (1 - tp) * 0.7;
+            const lw = lerp(8, 0.5, tp);
+
+            ctx.beginPath();
+            ctx.arc(w.x, w.y, r, 0, TAU);
+            ctx.lineWidth = lw;
+            ctx.strokeStyle = `rgba(240,50,18,${a})`;
+            ctx.stroke();
+
+            ctx.lineWidth = lw * 3;
+            ctx.strokeStyle = `rgba(160,8,5,${a * 0.35})`;
+            ctx.stroke();
+
+            if (tp < 0.5) {
+              const r2 = lerp(0, w.maxR * 0.5, tp * 2);
+              ctx.beginPath();
+              ctx.arc(w.x, w.y, r2, 0, TAU);
+              ctx.lineWidth = lw * 0.5;
+              ctx.strokeStyle = `rgba(255,90,40,${a * 0.5})`;
+              ctx.stroke();
+            }
+          }
+
+          /* ── Smoke (drawn under flame) ── */
+          ctx.globalCompositeOperation = "source-over";
+          for (let i = 0; i < SMAX; i++) {
+            const s = smoke[i];
+            if (!s.alive) continue;
+            s.age += dt;
+            if (s.age >= s.life) { s.alive = false; continue; }
+            s.x += s.vx * dtS;
+            s.y += s.vy * dtS;
+            s.vy -= dtS * 8;
+            s.vx += rand(-4, 4) * dtS;
+            const tp = s.age / s.life;
+            const r = s.r * (1 + tp * 1.2);
+            const a = s.dark
+              ? (1 - tp) * 0.18 * Math.sin(tp * Math.PI)
+              : (1 - tp) * 0.1 * Math.sin(tp * Math.PI);
+            /* Dark smoke: near-black with deep crimson tint; light: dark maroon */
+            const col = s.dark ? `rgba(12,2,2,${a})` : `rgba(80,10,5,${a})`;
+            const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, Math.max(1, r));
+            g.addColorStop(0, col);
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, Math.max(1, r), 0, TAU);
+            ctx.fill();
+          }
+
+          /* ── Flame puffs ── */
+          ctx.globalCompositeOperation = "lighter";
+          for (let i = 0; i < FMAX; i++) {
+            const f = flames[i];
+            if (!f.alive) continue;
+            f.age += dt;
+            if (f.age >= f.life) { f.alive = false; continue; }
+            f.x += f.vx * dtS;
+            f.y += f.vy * dtS;
+            f.vy -= dtS * 55;
+            f.vx *= Math.pow(0.95, dtS * 60);
+            f.vx += Math.sin(now * 0.007 + f.age * 0.01) * dtS * 40;
+            const tp = f.age / f.life;
+            const hotness = f.hot * (1 - tp);
+            const r = f.r * (1 + tp * 0.3);
+            const a = Math.sin(tp * Math.PI) * 0.7 * f.hot;
+            const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, Math.max(1, r));
+            g.addColorStop(0,    sunColor(hotness, a));
+            g.addColorStop(0.45, sunColor(hotness * 0.6, a * 0.7));
+            g.addColorStop(0.8,  sunColor(hotness * 0.3, a * 0.3));
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(f.x, f.y, Math.max(1, r), 0, TAU);
+            ctx.fill();
+          }
+
+          /* ── Trail — crimson solar ribbon ── */
+          if (trail.length >= 3) {
+            for (let i = 1; i < trail.length; i++) {
+              const age = (now - trail[i].t) / 320;
+              const alpha = clamp(1 - age, 0, 1);
+              if (alpha < 0.01) continue;
+              const w = lerp(2, 10, 1 - age);
+              ctx.beginPath();
+              ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+              ctx.lineTo(trail[i].x, trail[i].y);
+              /* Deep crimson outer glow */
+              ctx.lineWidth = w * 4;
+              ctx.strokeStyle = `rgba(140,5,2,${alpha * 0.15})`;
+              ctx.stroke();
+              /* Scarlet mid */
+              ctx.lineWidth = w * 2.5;
+              ctx.strokeStyle = `rgba(230,25,10,${alpha * 0.32})`;
+              ctx.stroke();
+              /* Fiery red accent */
+              ctx.lineWidth = w * 1.4;
+              ctx.strokeStyle = `rgba(255,60,20,${alpha * 0.55})`;
+              ctx.stroke();
+              /* Hot orange-red core */
+              ctx.lineWidth = w * 0.8;
+              ctx.strokeStyle = `rgba(255,105,45,${alpha * 0.72})`;
+              ctx.stroke();
+              /* Bright tip spine */
+              ctx.lineWidth = Math.max(1, w * 0.42);
+              ctx.strokeStyle = `rgba(255,175,100,${alpha * 0.90})`;
+              ctx.stroke();
+            }
+          }
+
+          /* ── Sparks ── */
+          for (let i = 0; i < SPKMAX; i++) {
+            const s = sparks[i];
+            if (!s.alive) continue;
+            s.age += dt;
+            if (s.age >= s.life) { s.alive = false; continue; }
+            s.px = s.x; s.py = s.y;
+            s.x += s.vx * dtS;
+            s.y += s.vy * dtS;
+            s.vy += 180 * dtS;
+            s.vx *= Math.pow(0.88, dtS * 60);
+            const tp = s.age / s.life;
+            const a = clamp((1 - tp) * (1 - tp) * s.bright * 1.2, 0, 1);
+            const hotness = 1 - tp * 0.6;
+            const tlen = Math.hypot(s.x - s.px, s.y - s.py);
+            const slen = clamp(tlen, 2, 18);
+            const ang = Math.atan2(s.y - s.py, s.x - s.px);
+
+            ctx.setTransform(dpr, 0, 0, dpr, s.x, s.y);
+            ctx.rotate(ang + Math.PI);
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(slen, 0);
+            const gc = ctx.createLinearGradient(0, 0, slen, 0);
+            gc.addColorStop(0, sunColor(hotness, a));
+            gc.addColorStop(1, sunColor(hotness * 0.4, 0));
+            ctx.strokeStyle = gc;
+            ctx.lineWidth = clamp(2 - tp * 1.5, 0.5, 2);
+            ctx.stroke();
+            ctx.strokeStyle = sunColor(hotness, a * 0.25);
+            ctx.lineWidth = clamp(2 - tp * 1.5, 0.5, 2) * 2;
+            ctx.stroke();
+          }
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+          /* ── Embers ── */
+          for (let i = 0; i < EMAX; i++) {
+            const e = embers[i];
+            if (!e.alive) continue;
+            e.age += dt;
+            if (e.age >= e.life) { e.alive = false; continue; }
+            e.x += e.vx * dtS + Math.sin(now * 0.004 + e.phase) * e.sway * dtS;
+            e.y += e.vy * dtS;
+            e.vy += e.grav * dtS;
+            e.vx *= Math.pow(0.97, dtS * 60);
+            const tp = e.age / e.life;
+            const hotness = e.hot * (1 - tp * 0.7);
+            const a = (1 - tp) * (1 - tp) * 0.95;
+            const r = e.sz * (1 - tp * 0.3);
+
+            ctx.fillStyle = sunColor(hotness, a);
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, Math.max(0.5, r), 0, TAU);
+            ctx.fill();
+
+            ctx.fillStyle = sunColor(clamp(hotness, 0, 1), a * 0.3);
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, Math.max(0.5, r * 2.2), 0, TAU);
+            ctx.fill();
+          }
+
+          /* ── Cursor tip — Sun Breathing solar core ── */
+          {
+            const flicker =
+              0.88 +
+              0.08 * Math.sin(now * 0.013) +
+              0.06 * Math.sin(now * 0.031 + 1.3) +
+              0.04 * Math.sin(now * 0.05 + 2.7);
+            const jx = Math.sin(now * 0.022) * 1.2;
+            const jy = Math.sin(now * 0.019 + 1.5) * 1.2;
+            const cx = P.x + jx, cy = P.y + jy;
+
+            /* Far outer crimson aura */
+            const og = ctx.createRadialGradient(cx, cy, 0, cx, cy, 58 * flicker);
+            og.addColorStop(0,   `rgba(220,25,8,0.22)`);
+            og.addColorStop(0.45, `rgba(160,8,3,0.09)`);
+            og.addColorStop(1,   "rgba(0,0,0,0)");
+            ctx.fillStyle = og;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 58 * flicker, 0, TAU);
+            ctx.fill();
+
+            /* Corona ring — scarlet haze at mid radius */
+            const cg = ctx.createRadialGradient(cx, cy, 18 * flicker, cx, cy, 42 * flicker);
+            cg.addColorStop(0, "rgba(0,0,0,0)");
+            cg.addColorStop(0.5, `rgba(200,18,6,0.10)`);
+            cg.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = cg;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 42 * flicker, 0, TAU);
+            ctx.fill();
+
+            /* Mid flame bloom — deep red */
+            const mg = ctx.createRadialGradient(cx, cy - 2, 0, cx, cy, 28 * flicker);
+            mg.addColorStop(0,   `rgba(255,90,35,0.82)`);
+            mg.addColorStop(0.28, `rgba(240,30,10,0.70)`);
+            mg.addColorStop(0.65, `rgba(160,5,4,0.32)`);
+            mg.addColorStop(1,   "rgba(0,0,0,0)");
+            ctx.fillStyle = mg;
+            ctx.beginPath();
+            ctx.arc(cx, cy - 2, 28 * flicker, 0, TAU);
+            ctx.fill();
+
+            /* Inner hot core — scarlet to crimson */
+            const hg = ctx.createRadialGradient(cx, cy, 0, cx, cy, 9 * flicker);
+            hg.addColorStop(0,   `rgba(255,200,100,1)`);
+            hg.addColorStop(0.28, `rgba(255,80,30,0.95)`);
+            hg.addColorStop(0.62, `rgba(220,15,8,0.60)`);
+            hg.addColorStop(1,   "rgba(100,0,2,0)");
+            ctx.fillStyle = hg;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 9 * flicker, 0, TAU);
+            ctx.fill();
+
+            /* Tiny bright center point */
+            ctx.fillStyle = `rgba(255,210,120,${flicker * 0.96})`;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 2.4 * flicker, 0, TAU);
+            ctx.fill();
+          }
+
+          ctx.globalCompositeOperation = "source-over";
+
+          /* ── Heat shimmer layer on HD canvas ── */
+          hctx.clearRect(0, 0, W, H);
+          for (let i = 0; i < HDMAX; i++) {
+            const h = hdCells[i];
+            if (!h.alive) continue;
+            h.age += dt;
+            if (h.age >= h.life) { h.alive = false; continue; }
+            const tp = h.age / h.life;
+            const r = h.str * 20 * (1 - tp * 0.4);
+            const a = (1 - tp) * 0.11;
+            const g = hctx.createRadialGradient(h.x, h.y, 0, h.x, h.y, r);
+            g.addColorStop(0,   `rgba(220,35,10,${a})`);
+            g.addColorStop(0.5, `rgba(140,8,3,${a * 0.4})`);
+            g.addColorStop(1,   "rgba(0,0,0,0)");
+            hctx.fillStyle = g;
+            hctx.beginPath();
+            hctx.arc(h.x, h.y, r, 0, TAU);
+            hctx.fill();
+          }
+        }
+
+        requestAnimationFrame(frame);
+      })();
+    </script>
+  </body>
+</html>
